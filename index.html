@@ -284,6 +284,39 @@
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
   <script>
+    // ─── Haptic engine ─────────────────────────────────────────────────────────
+    const Haptic = {
+      _v: (p) => { try { navigator.vibrate?.(p); } catch (_) {} },
+      soft:    function() { this._v(5); },
+      tap:     function() { this._v(8); },
+      medium:  function() { this._v(16); },
+      heavy:   function() { this._v(30); },
+      success: function() { this._v([10, 50, 15]); },
+      error:   function() { this._v([35, 25, 35]); },
+    };
+
+    // ─── Motion / tilt engine ───────────────────────────────────────────────────
+    const Motion = (() => {
+      const cbs = [];
+      let _g = 0, _b = 0, _active = false;
+      const handle = (e) => { _g = e.gamma || 0; _b = e.beta || 0; cbs.forEach(f => f(_g, _b)); };
+      const start = async () => {
+        if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+          if (await DeviceOrientationEvent.requestPermission() !== 'granted') return false;
+        }
+        window.addEventListener('deviceorientation', handle, { passive: true });
+        _active = true;
+        return true;
+      };
+      return {
+        onTilt: (fn) => cbs.push(fn),
+        start,
+        get active() { return _active; },
+        needsPermission: () => typeof DeviceOrientationEvent?.requestPermission === 'function',
+        isMobile: () => 'ontouchstart' in window,
+      };
+    })();
+
     const TRACK_URI = "spotify:track:64h0585a6LWXOdsCD2pOiW";
     const PREVIEW_LIMIT_MS = 30000;
     const AMBIENT_COUNT = 75;
@@ -389,6 +422,7 @@
     // Pointer drag
     function onPointerDownStar(ev, d) {
       if (!introComplete || matchEnded) return;
+      Haptic.soft();
       ev.preventDefault();
       dragFromIdx = d.idx;
       cursorPoint = [d.x, d.y];
@@ -414,6 +448,7 @@
         if (!exists) {
           const correct = isCanonical(dragFromIdx, hitIdx);
           userLinks.push({ a: dragFromIdx, b: hitIdx, correct });
+          if (correct) { Haptic.success(); } else { Haptic.error(); }
           updateScore();
         }
       }
@@ -437,6 +472,7 @@
       const correctCount = userLinks.filter(l => l.correct).length;
       document.getElementById("matched").textContent = correctCount;
       if (correctCount === 4 && !matchEnded) {
+        Haptic.heavy();
         endMatch(true);
       }
     }
@@ -571,6 +607,29 @@
         });
       });
     };
+
+    // ─── Tilt parallax ─────────────────────────────────────────────────────────
+    Motion.onTilt((gamma, beta) => {
+      const tx = gamma * 0.2;
+      const ty = (beta - 90) * 0.1;
+      ambientLayer.attr("transform", `translate(${tx}, ${ty})`);
+      // Target stars shift slightly less for depth
+      targetLayer.attr("transform", `translate(${tx * 0.55}, ${ty * 0.55})`);
+    });
+
+    // Init motion
+    if (Motion.isMobile()) {
+      if (Motion.needsPermission()) {
+        const btn = document.createElement('button');
+        btn.textContent = '↺ tilt';
+        btn.setAttribute('aria-label', 'Enable tilt controls');
+        btn.style.cssText = 'position:fixed;bottom:100px;right:16px;z-index:9999;background:rgba(0,0,0,0.8);color:rgba(255,210,122,0.9);border:1px solid rgba(255,210,122,0.3);border-radius:20px;padding:7px 14px;font-size:11px;font-family:monospace;letter-spacing:.05em;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+        document.body.appendChild(btn);
+        btn.addEventListener('click', async () => { if (await Motion.start()) btn.remove(); });
+      } else {
+        Motion.start();
+      }
+    }
   </script>
 </body>
 </html>
